@@ -15,8 +15,8 @@ from groq import Groq
 
 logger = logging.getLogger(__name__)
 
-# Modelo solicitado para o projeto (pode sobrescrever com GROQ_MODEL no .env)
-MODELO_PADRAO = "llama3-70b-8192"
+# Padrão alinhado à Groq (llama3-70b-8192 foi descontinuado — ver console.groq.com/docs/deprecations)
+MODELO_PADRAO = "llama-3.3-70b-versatile"
 
 # Pequenas variações de “direção” para o modelo — reduz sensação de texto repetido
 NUANCES_ESTILO = (
@@ -55,7 +55,7 @@ def gerar_mensagem(nome: str) -> str:
     Gera texto de aniversário com a Groq. Nunca lança exceção por falha da API:
     em erro, retorna mensagem_padrao(nome).
 
-    Cliente Groq autenticado com GROQ_API_KEY. Modelo padrão: llama3-70b-8192.
+    Cliente Groq autenticado com GROQ_API_KEY. Modelo padrão: llama-3.3-70b-versatile.
     """
     api_key = os.environ.get("GROQ_API_KEY", "").strip()
     if not api_key:
@@ -95,6 +95,6 @@ def gerar_mensagem(nome: str) -> str:
         return text
 
     except Exception as e:
-        # Qualquer falha da API ou do SDK → fallback obrigatório
-        logger.exception("Falha ao chamar a API Groq para %s: %s", nome, e)
+        # Falha esperada às vezes (modelo, quota, rede) → fallback sem traceback no console
+        logger.warning("Groq não gerou texto para %s (%s); usando mensagem padrão.", nome, e)
         return mensagem_padrao(nome)

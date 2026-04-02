@@ -43,7 +43,7 @@ Copie `.env.example` para `.env` e preencha:
 - `GROQ_API_KEY` — chave da API Groq
 - `CHANNEL_ID` — ID numérico do canal de texto (modo desenvolvedor no Discord → copiar ID)
 - `TIMEZONE` — opcional, fuso [IANA](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) (padrão `America/Sao_Paulo`)
-- `GROQ_MODEL` — opcional (padrão `llama3-70b-8192`)
+- `GROQ_MODEL` — opcional (padrão `llama-3.3-70b-versatile`; veja modelos atuais na Groq)
 
 ## Como rodar
 
