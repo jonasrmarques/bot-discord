@@ -1,0 +1,212 @@
+"""
+Ponto de entrada do bot Discord: comandos, agendamento diário (09:00) e envio com IA.
+
+Requer intents no Developer Portal:
+- MESSAGE CONTENT INTENT (comandos com prefixo !)
+- SERVER MEMBERS INTENT (opcional, útil para display names em cache)
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+from typing import TYPE_CHECKING
+
+import discord
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from discord.ext import commands
+from dotenv import load_dotenv
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from config import load_config
+from services import ai_service, birthday_service
+
+if TYPE_CHECKING:
+    from config import Config
+
+# -----------------------------------------------------------------------------
+# Logging básico no console (nível INFO + nome do logger)
+# -----------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("birthday_bot")
+
+# Carrega .env local antes de ler config (não sobrescreve variáveis já definidas no SO)
+load_dotenv()
+
+
+def _make_bot(cfg: Config) -> commands.Bot:
+    """Cria instância do bot com prefixo e intents necessários para comandos de texto."""
+    intents = discord.Intents.default()
+    intents.message_content = True  # Obrigatório para ler mensagens com prefixo
+    intents.members = True  # Melhora cache de membros para display_name (ativar no Portal)
+
+    return commands.Bot(command_prefix="!", intents=intents, help_command=None)
+
+
+def _scheduler_for_timezone(tz_name: str) -> AsyncIOScheduler:
+    """Inicializa o APScheduler com o fuso informado (ex.: America/Sao_Paulo)."""
+    try:
+        tz = ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"TIMEZONE inválido: {tz_name}") from exc
+    return AsyncIOScheduler(timezone=tz)
+
+
+async def send_daily_birthdays(bot: commands.Bot, cfg: Config) -> None:
+    """
+    Tarefa agendada: aniversariantes do dia (por nome no JSON), mensagem via Groq.
+    Sem menção @: o nome aparece em destaque no texto. Usa birthday_state.json
+    para não repetir no mesmo dia.
+    """
+    key = birthday_service.today_key(cfg.timezone)
+    nomes = birthday_service.get_birthday_names_for_key(key)
+    if not nomes:
+        logger.info("Nenhum aniversariante na data %s (chave MM-DD).", key)
+        return
+
+    channel = bot.get_channel(cfg.channel_id)
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(cfg.channel_id)
+        except discord.HTTPException as e:
+            logger.error("Canal %s inacessível: %s", cfg.channel_id, e)
+            return
+
+    if not isinstance(channel, discord.TextChannel):
+        logger.error("CHANNEL_ID deve apontar para um canal de texto.")
+        return
+
+    for nome in nomes:
+        try:
+            can_send, today_iso, _ = birthday_service.should_send_today(cfg.timezone, nome)
+            if not can_send:
+                logger.info("Já enviado hoje (%s) para %s; ignorando duplicata.", today_iso, nome)
+                continue
+
+            # gerar_mensagem trata erros da Groq e devolve fallback estável
+            msg_text = ai_service.gerar_mensagem(nome)
+            await channel.send(f"**{nome}**\n{msg_text}")
+            birthday_service.mark_sent(cfg.timezone, nome)
+            logger.info("Mensagem de aniversário enviada para %s no canal %s", nome, channel.id)
+
+        except discord.HTTPException as e:
+            logger.error("Erro Discord ao enviar para %s: %s", nome, e)
+        except Exception:
+            logger.exception("Erro inesperado ao processar aniversariante %s", nome)
+
+
+def setup_commands(bot: commands.Bot, cfg: Config) -> None:
+    """Registra comandos de prefixo (!addbirthday, !listbirthdays, !helpbirthday)."""
+
+    @bot.command(name="addbirthday")
+    async def add_birthday_cmd(ctx: commands.Context, *, texto: str) -> None:
+        """
+        Uso: !addbirthday Nome DD-MM
+        Salva só o nome (sem @) no birthdays.json com chave MM-DD.
+        """
+        partes = texto.rsplit(maxsplit=1)
+        if len(partes) != 2:
+            await ctx.send("Uso: `!addbirthday Nome DD-MM` (ex.: `!addbirthday Rogério 29-01`).")
+            return
+        nome, date_fragment = partes[0].strip(), partes[1].strip()
+        if not nome:
+            await ctx.send("Informe o nome antes da data.")
+            return
+        try:
+            key = birthday_service.add_birthday(nome, date_fragment)
+        except ValueError as e:
+            await ctx.send(f"❌ {e}")
+            return
+        await ctx.send(
+            f"✅ Aniversário de **{nome}** registrado para **{date_fragment}** "
+            f"(chave `{key}` no JSON)."
+        )
+
+    @bot.command(name="listbirthdays")
+    async def list_birthdays_cmd(ctx: commands.Context) -> None:
+        """Lista todos os aniversários cadastrados (chave MM-DD e nomes)."""
+        rows = birthday_service.list_birthdays_formatted()
+        if not rows:
+            await ctx.send("Nenhum aniversário cadastrado.")
+            return
+        lines: list[str] = []
+        for mm_dd, nomes in rows:
+            if not nomes:
+                continue
+            nomes_txt = ", ".join(nomes)
+            lines.append(f"**{mm_dd}** → {nomes_txt}")
+        text = "\n".join(lines)
+        if len(text) > 1900:
+            text = text[:1900] + "\n… (lista truncada)"
+        await ctx.send(text)
+
+    @bot.command(name="helpbirthday")
+    async def help_cmd(ctx: commands.Context) -> None:
+        """Resumo dos comandos e variáveis de ambiente."""
+        await ctx.send(
+            "**Comandos**\n"
+            "`!addbirthday Nome DD-MM` — cadastra aniversário (só o nome, sem @)\n"
+            "`!listbirthdays` — lista todos\n"
+            f"**Agendamento:** todo dia às **09:00** ({cfg.timezone}) no canal <#{cfg.channel_id}>\n"
+            "Variáveis: `DISCORD_TOKEN`, `GROQ_API_KEY`, `CHANNEL_ID`, opcional `TIMEZONE`, `GROQ_MODEL`"
+        )
+
+    @add_birthday_cmd.error
+    async def add_birthday_error(ctx: commands.Context, error: commands.CommandError) -> None:
+        if isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send("Uso: `!addbirthday Nome DD-MM` (ex.: `!addbirthday Rogério 29-01`).")
+        else:
+            logger.exception("Erro em addbirthday: %s", error)
+            await ctx.send("Ocorreu um erro ao processar o comando.")
+
+
+def main() -> None:
+    """Valida config, agenda job e inicia o loop do discord.py."""
+    try:
+        cfg = load_config()
+    except ValueError as e:
+        logger.error("%s", e)
+        sys.exit(1)
+
+    bot = _make_bot(cfg)
+    setup_commands(bot, cfg)
+
+    scheduler = _scheduler_for_timezone(cfg.timezone)
+
+    @bot.event
+    async def on_ready() -> None:
+        logger.info("Logado como %s (%s)", bot.user, bot.user.id if bot.user else "?")
+        logger.info("Fuso para aniversários: %s — job diário às 09:00", cfg.timezone)
+        if not scheduler.running:
+            # Cron às 09:00 no fuso configurado (AsyncIOScheduler executa corrotinas no loop)
+            scheduler.add_job(
+                send_daily_birthdays,
+                CronTrigger(hour=9, minute=0),
+                args=[bot, cfg],
+                id="daily_birthdays",
+                replace_existing=True,
+            )
+            scheduler.start()
+
+    @bot.event
+    async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
+        if isinstance(error, commands.CommandNotFound):
+            return
+        if ctx.command is not None and ctx.command.name == "addbirthday":
+            return  # já tratado no local error handler
+        logger.warning("Erro de comando: %s", error)
+
+    try:
+        bot.run(cfg.discord_token)
+    except discord.LoginFailure:
+        logger.error("Token do Discord inválido.")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
