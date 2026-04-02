@@ -183,6 +183,18 @@ def should_send_today(
     return True, today_iso, sent
 
 
+def reset_sent_for_today(zone_name: str) -> None:
+    """
+    Zera a lista de destinatários já notificados hoje (só para testes com RUN_BIRTHDAY_ON_START=force).
+    """
+    from zoneinfo import ZoneInfo
+
+    today = datetime.now(ZoneInfo(zone_name)).date()
+    today_iso = today.isoformat()
+    save_sent_state(today_iso, set())
+    logger.info("Estado de envios do dia %s foi zerado.", today_iso)
+
+
 def mark_sent(zone_name: str, recipient_key: str) -> None:
     """Marca destinatário como já notificado hoje (após envio bem-sucedido)."""
     from zoneinfo import ZoneInfo

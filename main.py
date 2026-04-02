@@ -8,6 +8,7 @@ Requer intents no Developer Portal:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from typing import TYPE_CHECKING
@@ -153,7 +154,8 @@ def setup_commands(bot: commands.Bot, cfg: Config) -> None:
             "`!addbirthday Nome DD-MM` — cadastra aniversário (só o nome, sem @)\n"
             "`!listbirthdays` — lista todos\n"
             f"**Agendamento:** todo dia às **09:00** ({cfg.timezone}) no canal <#{cfg.channel_id}>\n"
-            "Variáveis: `DISCORD_TOKEN`, `GROQ_API_KEY`, `CHANNEL_ID`, opcional `TIMEZONE`, `GROQ_MODEL`"
+            "Variáveis: `DISCORD_TOKEN`, `GROQ_API_KEY`, `CHANNEL_ID`, opcional `TIMEZONE`, `GROQ_MODEL`, "
+            "`RUN_BIRTHDAY_ON_START` (`1`/`once` ao subir; `force` = limpa estado do dia e roda)"
         )
 
     @add_birthday_cmd.error
@@ -177,9 +179,12 @@ def main() -> None:
     setup_commands(bot, cfg)
 
     scheduler = _scheduler_for_timezone(cfg.timezone)
+    # on_ready pode disparar de novo após reconexão; o job “ao subir” só uma vez por execução do processo
+    _startup_birthday_ja_disparado = False
 
     @bot.event
     async def on_ready() -> None:
+        nonlocal _startup_birthday_ja_disparado
         logger.info("Logado como %s (%s)", bot.user, bot.user.id if bot.user else "?")
         logger.info("Fuso para aniversários: %s — job diário às 09:00", cfg.timezone)
         if not scheduler.running:
@@ -192,6 +197,15 @@ def main() -> None:
                 replace_existing=True,
             )
             scheduler.start()
+
+        # Teste local: RUN_BIRTHDAY_ON_START=1 roda o job ao subir; force zera estado do dia antes
+        if cfg.run_birthday_on_start in ("once", "force") and not _startup_birthday_ja_disparado:
+            _startup_birthday_ja_disparado = True
+            if cfg.run_birthday_on_start == "force":
+                birthday_service.reset_sent_for_today(cfg.timezone)
+                logger.info("RUN_BIRTHDAY_ON_START=force — estado do dia limpo; disparando job agora.")
+            asyncio.create_task(send_daily_birthdays(bot, cfg))
+            logger.info("RUN_BIRTHDAY_ON_START: job de aniversários disparado na inicialização.")
 
     @bot.event
     async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
