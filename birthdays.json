@@ -1,20 +1,56 @@
 {
-  "01-29": ["Rogério"],
-  "02-14": ["Mountain"],
-  "02-29": ["Kaka"],
-  "03-14": ["Valleska Fofuxa"],
-  "04-03": ["Krane"],
-  "04-09": ["Rafols"],
-  "04-27": ["Natasha"],
-  "05-01": ["Guilherme"],
-  "05-09": ["AgriShow"],
-  "05-29": ["Paulindo"],
-  "06-21": ["Graci"],
-  "07-31": ["Hélio"],
-  "09-15": ["Anne"],
-  "09-21": ["Xonas"],
-  "10-06": ["Toinho"],
-  "11-13": ["Mayla"],
-  "11-25": ["Gillete/Skynet"],
-  "11-28": ["Dudu Chupetão"]
+  "01-29": [
+    {"nome": "Rogério", "sexo": "masculino"}
+  ],
+  "02-14": [
+    {"nome": "Mountain", "sexo": "masculino"}
+  ],
+  "02-29": [
+    {"nome": "Kaka", "sexo": "masculino"}
+  ],
+  "03-14": [
+    {"nome": "Valleska Fofuxa", "sexo": "feminino"}
+  ],
+  "04-03": [
+    {"nome": "Krane", "sexo": "masculino"}
+  ],
+  "04-09": [
+    {"nome": "Rafols", "sexo": "masculino"}
+  ],
+  "04-27": [
+    {"nome": "Natasha", "sexo": "feminino"}
+  ],
+  "05-01": [
+    {"nome": "Guilherme", "sexo": "masculino"}
+  ],
+  "05-09": [
+    {"nome": "AgriShow", "sexo": "masculino"}
+  ],
+  "05-29": [
+    {"nome": "Paulindo", "sexo": "masculino"}
+  ],
+  "06-21": [
+    {"nome": "Graci", "sexo": "feminino"}
+  ],
+  "07-31": [
+    {"nome": "Hélio", "sexo": "masculino"}
+  ],
+  "09-15": [
+    {"nome": "Anne", "sexo": "feminino"}
+  ],
+  "09-21": [
+    {"nome": "Xonas", "sexo": "masculino"}
+  ],
+  "10-06": [
+    {"nome": "Toinho", "sexo": "masculino"}
+  ],
+  "11-13": [
+    {"nome": "Mayla", "sexo": "feminino"}
+  ],
+  "11-25": [
+    {"nome": "Gillete/Skynet", "sexo": "masculino"}
+  ],
+  "11-28": [
+    {"nome": "Dudu Chupetão", "sexo": "masculino"}
+  ]
 }

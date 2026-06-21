@@ -28,29 +28,33 @@ NUANCES_ESTILO = (
 )
 
 
-def mensagem_padrao(nome: str) -> str:
+def mensagem_padrao(nome: str, sexo: str = "masculino") -> str:
     """Resposta fixa quando a Groq não está disponível ou falha."""
+    _ = sexo
     return f"🎉 Parabéns {nome}! Muitas felicidades!"
 
 
-def _montar_prompt_usuario(nome: str) -> str:
+def _montar_prompt_usuario(nome: str, sexo: str = "masculino") -> str:
     """
     Prompt principal + nuance aleatória para variar tom sem mudar a identidade do bot.
 
     O enunciado pede tom natural, engraçado, com humor leve, emojis e zoeira leve.
     """
     nuance = random.choice(NUANCES_ESTILO)
+    genero_txt = "feminino" if sexo == "feminino" else "masculino"
     return (
         "Crie uma mensagem de aniversário engraçada, estilo grupo de amigos no Discord.\n"
         "Use humor leve, emojis e uma pequena zoeira.\n\n"
-        f"Nome da pessoa: {nome}\n\n"
+        f"Nome da pessoa: {nome}\n"
+        f"Sexo/gênero para concordância: {genero_txt}\n\n"
         f"Variação de estilo (siga de forma natural): {nuance}\n\n"
-        "Regras: no máximo 3 frases curtas; não use menções @ nem tags de usuário; "
+        "Regras: no máximo 3 frases curtas; use concordância de gênero em português "
+        "(adjetivos e pronomes no gênero correto); não use menções @ nem tags de usuário; "
         "não use hashtags; evite repetir a mesma estrutura de frases de um parabéns genérico."
     )
 
 
-def gerar_mensagem(nome: str) -> str:
+def gerar_mensagem(nome: str, sexo: str = "masculino") -> str:
     """
     Gera texto de aniversário com a Groq. Nunca lança exceção por falha da API:
     em erro, retorna mensagem_padrao(nome).
@@ -60,14 +64,14 @@ def gerar_mensagem(nome: str) -> str:
     api_key = os.environ.get("GROQ_API_KEY", "").strip()
     if not api_key:
         logger.warning("GROQ_API_KEY não definida; usando mensagem padrão.")
-        return mensagem_padrao(nome)
+        return mensagem_padrao(nome, sexo)
 
     modelo = os.environ.get("GROQ_MODEL", MODELO_PADRAO).strip() or MODELO_PADRAO
 
     try:
         # SDK oficial: mesma ideia de chat completions, endpoint Groq
         client = Groq(api_key=api_key)
-        user_content = _montar_prompt_usuario(nome)
+        user_content = _montar_prompt_usuario(nome, sexo)
 
         response = client.chat.completions.create(
             model=modelo,
@@ -89,7 +93,7 @@ def gerar_mensagem(nome: str) -> str:
         text = (getattr(choice, "content", None) or "").strip()
         if not text:
             logger.warning("Groq retornou conteúdo vazio para %s", nome)
-            return mensagem_padrao(nome)
+            return mensagem_padrao(nome, sexo)
 
         logger.info("Mensagem de aniversário gerada via Groq para %s", nome)
         return text
@@ -97,4 +101,4 @@ def gerar_mensagem(nome: str) -> str:
     except Exception as e:
         # Falha esperada às vezes (modelo, quota, rede) → fallback sem traceback no console
         logger.warning("Groq não gerou texto para %s (%s); usando mensagem padrão.", nome, e)
-        return mensagem_padrao(nome)
+        return mensagem_padrao(nome, sexo)

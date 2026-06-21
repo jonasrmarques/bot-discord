@@ -21,6 +21,8 @@ class Config:
     timezone: str
     # off | once | force — ver RUN_BIRTHDAY_ON_START
     run_birthday_on_start: Literal["off", "once", "force"]
+    # off | everyone | here — menção no envio automático de aniversário
+    birthday_mention: Literal["off", "everyone", "here"]
 
 
 def _parse_run_birthday_on_start() -> Literal["off", "once", "force"]:
@@ -37,6 +39,23 @@ def _parse_run_birthday_on_start() -> Literal["off", "once", "force"]:
         return "once"
     if raw == "force":
         return "force"
+    return "off"
+
+
+def _parse_birthday_mention() -> Literal["off", "everyone", "here"]:
+    """
+    BIRTHDAY_MENTION (opcional):
+    - off / vazio: sem menção (padrão)
+    - everyone: inclui @everyone na mensagem
+    - here: inclui @here na mensagem
+    """
+    raw = os.environ.get("BIRTHDAY_MENTION", "").strip().lower()
+    if raw in ("", "0", "false", "no", "off", "não", "nao", "none"):
+        return "off"
+    if raw in ("everyone", "all", "todos"):
+        return "everyone"
+    if raw in ("here", "online", "aqui"):
+        return "here"
     return "off"
 
 
@@ -68,4 +87,5 @@ def load_config() -> Config:
         channel_id=channel_id,
         timezone=tz,
         run_birthday_on_start=_parse_run_birthday_on_start(),
+        birthday_mention=_parse_birthday_mention(),
     )

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import discord
@@ -36,6 +37,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("birthday_bot")
 
+ROOT = Path(__file__).resolve().parent
+BIRTHDAY_IMAGE_PATH = ROOT / "static" / "image.png"
+
 # Carrega .env local antes de ler config (não sobrescreve variáveis já definidas no SO)
 load_dotenv()
 
@@ -58,6 +62,26 @@ def _scheduler_for_timezone(tz_name: str) -> AsyncIOScheduler:
     return AsyncIOScheduler(timezone=tz)
 
 
+def _format_birthday_message(
+    cfg: Config, nome: str, msg_text: str
+) -> tuple[str, discord.AllowedMentions]:
+    """Monta texto e permissões de menção conforme BIRTHDAY_MENTION."""
+    body = f"**{nome}**\n{msg_text}"
+    if cfg.birthday_mention == "everyone":
+        return f"{body}\n@everyone", discord.AllowedMentions(everyone=True)
+    if cfg.birthday_mention == "here":
+        return f"{body}\n@here", discord.AllowedMentions(everyone=True)
+    return body, discord.AllowedMentions.none()
+
+
+def _birthday_image_file() -> discord.File | None:
+    """Retorna anexo da imagem de aniversário, se existir no disco."""
+    if not BIRTHDAY_IMAGE_PATH.is_file():
+        logger.warning("Imagem %s não encontrada; enviando só texto.", BIRTHDAY_IMAGE_PATH)
+        return None
+    return discord.File(BIRTHDAY_IMAGE_PATH, filename="image.png")
+
+
 async def send_daily_birthdays(bot: commands.Bot, cfg: Config) -> None:
     """
     Tarefa agendada: aniversariantes do dia (por nome no JSON), mensagem via Groq.
@@ -65,8 +89,8 @@ async def send_daily_birthdays(bot: commands.Bot, cfg: Config) -> None:
     para não repetir no mesmo dia.
     """
     key = birthday_service.today_key(cfg.timezone)
-    nomes = birthday_service.get_birthday_names_for_key(key)
-    if not nomes:
+    aniversariantes = birthday_service.get_birthdays_for_key(key)
+    if not aniversariantes:
         logger.info("Nenhum aniversariante na data %s (chave MM-DD).", key)
         return
 
@@ -82,23 +106,32 @@ async def send_daily_birthdays(bot: commands.Bot, cfg: Config) -> None:
         logger.error("CHANNEL_ID deve apontar para um canal de texto.")
         return
 
-    for nome in nomes:
+    for person in aniversariantes:
         try:
-            can_send, today_iso, _ = birthday_service.should_send_today(cfg.timezone, nome)
+            can_send, today_iso, _ = birthday_service.should_send_today(cfg.timezone, person.nome)
             if not can_send:
-                logger.info("Já enviado hoje (%s) para %s; ignorando duplicata.", today_iso, nome)
+                logger.info(
+                    "Já enviado hoje (%s) para %s; ignorando duplicata.", today_iso, person.nome
+                )
                 continue
 
             # gerar_mensagem trata erros da Groq e devolve fallback estável
-            msg_text = ai_service.gerar_mensagem(nome)
-            await channel.send(f"**{nome}**\n{msg_text}")
-            birthday_service.mark_sent(cfg.timezone, nome)
-            logger.info("Mensagem de aniversário enviada para %s no canal %s", nome, channel.id)
+            msg_text = ai_service.gerar_mensagem(person.nome, person.sexo)
+            content, allowed = _format_birthday_message(cfg, person.nome, msg_text)
+            image = _birthday_image_file()
+            if image is not None:
+                await channel.send(content, file=image, allowed_mentions=allowed)
+            else:
+                await channel.send(content, allowed_mentions=allowed)
+            birthday_service.mark_sent(cfg.timezone, person.nome)
+            logger.info(
+                "Mensagem de aniversário enviada para %s no canal %s", person.nome, channel.id
+            )
 
         except discord.HTTPException as e:
-            logger.error("Erro Discord ao enviar para %s: %s", nome, e)
+            logger.error("Erro Discord ao enviar para %s: %s", person.nome, e)
         except Exception:
-            logger.exception("Erro inesperado ao processar aniversariante %s", nome)
+            logger.exception("Erro inesperado ao processar aniversariante %s", person.nome)
 
 
 def setup_commands(bot: commands.Bot, cfg: Config) -> None:
@@ -107,24 +140,17 @@ def setup_commands(bot: commands.Bot, cfg: Config) -> None:
     @bot.command(name="addbirthday")
     async def add_birthday_cmd(ctx: commands.Context, *, texto: str) -> None:
         """
-        Uso: !addbirthday Nome DD-MM
-        Salva só o nome (sem @) no birthdays.json com chave MM-DD.
+        Uso: !addbirthday Nome DD-MM [masculino|feminino]
+        Salva nome e sexo no birthdays.json com chave MM-DD.
         """
-        partes = texto.rsplit(maxsplit=1)
-        if len(partes) != 2:
-            await ctx.send("Uso: `!addbirthday Nome DD-MM` (ex.: `!addbirthday Rogério 29-01`).")
-            return
-        nome, date_fragment = partes[0].strip(), partes[1].strip()
-        if not nome:
-            await ctx.send("Informe o nome antes da data.")
-            return
         try:
-            key = birthday_service.add_birthday(nome, date_fragment)
+            nome, date_fragment, sexo = birthday_service.parse_add_birthday_text(texto)
+            key = birthday_service.add_birthday(nome, date_fragment, sexo)
         except ValueError as e:
             await ctx.send(f"❌ {e}")
             return
         await ctx.send(
-            f"✅ Aniversário de **{nome}** registrado para **{date_fragment}** "
+            f"✅ Aniversário de **{nome}** ({sexo}) registrado para **{date_fragment}** "
             f"(chave `{key}` no JSON)."
         )
 
@@ -136,10 +162,10 @@ def setup_commands(bot: commands.Bot, cfg: Config) -> None:
             await ctx.send("Nenhum aniversário cadastrado.")
             return
         lines: list[str] = []
-        for mm_dd, nomes in rows:
-            if not nomes:
+        for mm_dd, people in rows:
+            if not people:
                 continue
-            nomes_txt = ", ".join(nomes)
+            nomes_txt = ", ".join(f"{p.nome} ({p.sexo[0]})" for p in people)
             lines.append(f"**{mm_dd}** → {nomes_txt}")
         text = "\n".join(lines)
         if len(text) > 1900:
@@ -151,17 +177,21 @@ def setup_commands(bot: commands.Bot, cfg: Config) -> None:
         """Resumo dos comandos e variáveis de ambiente."""
         await ctx.send(
             "**Comandos**\n"
-            "`!addbirthday Nome DD-MM` — cadastra aniversário (só o nome, sem @)\n"
+            "`!addbirthday Nome DD-MM [masculino|feminino]` — cadastra aniversário\n"
             "`!listbirthdays` — lista todos\n"
             f"**Agendamento:** todo dia às **09:00** ({cfg.timezone}) no canal <#{cfg.channel_id}>\n"
             "Variáveis: `DISCORD_TOKEN`, `GROQ_API_KEY`, `CHANNEL_ID`, opcional `TIMEZONE`, `GROQ_MODEL`, "
+            "`BIRTHDAY_MENTION` (`everyone` | `here` | `off`), "
             "`RUN_BIRTHDAY_ON_START` (`1`/`once` ao subir; `force` = limpa estado do dia e roda)"
         )
 
     @add_birthday_cmd.error
     async def add_birthday_error(ctx: commands.Context, error: commands.CommandError) -> None:
         if isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send("Uso: `!addbirthday Nome DD-MM` (ex.: `!addbirthday Rogério 29-01`).")
+            await ctx.send(
+                "Uso: `!addbirthday Nome DD-MM [masculino|feminino]` "
+                "(ex.: `!addbirthday Rogério 29-01 masculino`)."
+            )
         else:
             logger.exception("Erro em addbirthday: %s", error)
             await ctx.send("Ocorreu um erro ao processar o comando.")
@@ -187,6 +217,7 @@ def main() -> None:
         nonlocal _startup_birthday_ja_disparado
         logger.info("Logado como %s (%s)", bot.user, bot.user.id if bot.user else "?")
         logger.info("Fuso para aniversários: %s — job diário às 09:00", cfg.timezone)
+        logger.info("Menção em aniversários: %s", cfg.birthday_mention)
         if not scheduler.running:
             # Cron às 09:00 no fuso configurado (AsyncIOScheduler executa corrotinas no loop)
             scheduler.add_job(
