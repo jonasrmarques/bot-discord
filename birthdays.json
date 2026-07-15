@@ -11,6 +11,9 @@
   "03-14": [
     {"nome": "Valleska Fofuxa", "sexo": "feminino"}
   ],
+  "03-29": [
+    {"nome": "Morgana", "sexo": "feminino"}
+  ],
   "04-03": [
     {"nome": "Krane", "sexo": "masculino"}
   ],
@@ -22,9 +25,6 @@
   ],
   "05-01": [
     {"nome": "Guilherme", "sexo": "masculino"}
-  ],
-  "05-09": [
-    {"nome": "AgriShow", "sexo": "masculino"}
   ],
   "05-29": [
     {"nome": "Paulindo", "sexo": "masculino"}
